@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { joinRoom, type Room } from '@trystero-p2p/torrent';
-import { getRandomTrackers, hashRoomId } from '../utils/trystero';
+import { hashRoomId } from '../utils/trystero';
 import { DEFAULT_ICE_SERVERS } from '../utils/config';
 
 export type TrysteroState = 'idle' | 'joining' | 'waiting' | 'connecting' | 'connected' | 'disconnected' | 'failed' | 'error';
@@ -45,8 +45,8 @@ export function useTrystero(onMessageReceived: (data: string | ArrayBuffer) => v
 
     try {
       const roomId = await hashRoomId(normalizedCode);
-      const trackerUrls = getRandomTrackers(3);
-      const room = joinRoom({ appId: 'fileshare:v1', relayConfig: { urls: trackerUrls } }, roomId);
+      // Trystero default relays are ultra-stable and guaranteed to match across all peers
+      const room = joinRoom({ appId: 'fileshare:v1' }, roomId);
       roomRef.current = room;
 
       if (isInitiator) {
@@ -105,7 +105,7 @@ export function useTrystero(onMessageReceived: (data: string | ArrayBuffer) => v
 
         pc.onicecandidate = (event) => {
           if (event.candidate) {
-            signalAction.send({ type: 'candidate', candidate: event.candidate.toJSON() } as any, { target: peerId });
+            signalAction.send({ type: 'candidate', candidate: event.candidate.toJSON() } as any);
           }
         };
 
@@ -129,7 +129,7 @@ export function useTrystero(onMessageReceived: (data: string | ArrayBuffer) => v
         if (isInitiator) {
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
-          signalAction.send({ type: 'offer', sdp: { type: offer.type, sdp: offer.sdp } } as any, { target: peerId });
+          signalAction.send({ type: 'offer', sdp: { type: offer.type, sdp: offer.sdp } } as any);
         }
       };
 
@@ -151,7 +151,7 @@ export function useTrystero(onMessageReceived: (data: string | ArrayBuffer) => v
             }
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
-            signalAction.send({ type: 'answer', sdp: { type: answer.type, sdp: answer.sdp } } as any, { target: peerId });
+            signalAction.send({ type: 'answer', sdp: { type: answer.type, sdp: answer.sdp } } as any);
           } else if (data.type === 'answer') {
             await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
             // Flush queued ICE candidates
