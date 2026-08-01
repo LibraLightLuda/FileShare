@@ -65,34 +65,48 @@ export function useTrystero(onMessageReceived: (data: string | ArrayBuffer) => v
         
         pcRef.current = pc;
 
-        // 기존 프로토콜(RTCDataChannel)과 완벽 호환되도록 in-band out-of-band(negotiated) 채널 생성
-        // Trystero 내부적으로 id 0을 사용하므로 충돌 방지를 위해 id 1 사용
-        const dc = pc.createDataChannel('fileTransfer', {
-          negotiated: true,
-          id: 1
-        });
-        
-        dcRef.current = dc;
-        dc.binaryType = 'arraybuffer';
-        
-        dc.onmessage = (e: any) => {
-          if (onMessageRef.current) {
-            onMessageRef.current(e.data);
+        const setupDc = (dc: RTCDataChannel) => {
+          dcRef.current = dc;
+          dc.binaryType = 'arraybuffer';
+          
+          dc.onmessage = (e: any) => {
+            if (onMessageRef.current) {
+              onMessageRef.current(e.data);
+            }
+          };
+
+          dc.onopen = () => {
+            console.log('[Trystero] DataChannel onopen fired');
+            setConnectionState('connected');
+          };
+
+          if (dc.readyState === 'open') {
+            console.log('[Trystero] DataChannel already open upon creation');
+            setConnectionState('connected');
           }
+
+          dc.onclose = () => {
+            setConnectionState('disconnected');
+          };
+
+          dc.onerror = () => {
+            setConnectionState('failed');
+            setErrorMessage('데이터 채널 오류가 발생했습니다.');
+          };
         };
 
-        dc.onopen = () => {
-          setConnectionState('connected');
-        };
-
-        dc.onclose = () => {
-          setConnectionState('disconnected');
-        };
-
-        dc.onerror = () => {
-          setConnectionState('failed');
-          setErrorMessage('데이터 채널 오류가 발생했습니다.');
-        };
+        if (isInitiator) {
+          // Initiator explicitly creates the channel, which triggers renegotiation
+          const dc = pc.createDataChannel('fileTransfer');
+          setupDc(dc);
+        } else {
+          // Answerer waits for the incoming channel
+          pc.addEventListener('datachannel', (event) => {
+            if (event.channel.label === 'fileTransfer') {
+              setupDc(event.channel);
+            }
+          });
+        }
 
         pc.onconnectionstatechange = () => {
           if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed' || pc.connectionState === 'closed') {
