@@ -1,31 +1,53 @@
 import { useState, useEffect, useRef } from 'react';
-import { Copy, Upload, Download, CheckCircle, XCircle, File as FileIcon, Clock, AlertTriangle, Send } from 'lucide-react';
+import { Copy, Upload, Download, CheckCircle, XCircle, File as FileIcon, Clock, AlertTriangle, Send, Link as LinkIcon, Settings } from 'lucide-react';
 import QRCode from 'qrcode';
+import { useTrystero } from './hooks/useTrystero';
 import { useWebRTC } from './hooks/useWebRTC';
 import { useFileTransfer, type TransferProgress } from './hooks/useFileTransfer';
+import { generateRoomCode, normalizeRoomCode, formatRoomCode } from './utils/trystero';
 import './index.css';
 
-type AppState = 'select_role' | 'creating_offer' | 'show_offer' | 'enter_offer' | 'creating_answer' | 'show_answer' | 'enter_answer' | 'connected';
+type AppMode = 'home' | 'room' | 'connected' | 'manual';
 
 export default function App() {
-  const [appState, setAppState] = useState<AppState>('select_role');
+  const [appMode, setAppMode] = useState<AppMode>('home');
+  const [roomCode, setRoomCode] = useState('');
+  const [inputCode, setInputCode] = useState('');
+  const [qrUrl, setQrUrl] = useState('');
+  
+  // Trystero (Default)
+  const {
+    connectionState: trysteroState,
+    errorMessage: trysteroError,
+    initRoom,
+    disconnect: disconnectTrystero,
+    sendData: trysteroSendData,
+    dataChannelRef: trysteroDcRef
+  } = useTrystero(handleMessageOuter);
+
+  // Manual WebRTC (Fallback)
+  const [manualState, setManualState] = useState<'idle' | 'creating_offer' | 'show_offer' | 'enter_offer' | 'creating_answer' | 'show_answer' | 'enter_answer'>('idle');
   const [offerStr, setOfferStr] = useState('');
   const [answerStr, setAnswerStr] = useState('');
-  const [inputStr, setInputStr] = useState('');
-  const [qrUrl, setQrUrl] = useState('');
-
+  const [manualInputStr, setManualInputStr] = useState('');
   const {
     webrtcState,
-    errorMsg,
+    errorMsg: manualError,
     createOffer,
     applyOfferAndCreateAnswer,
     applyAnswer,
-    sendData,
+    sendData: manualSendData,
     onMessageRef,
-    dataChannelRef,
+    dataChannelRef: manualDcRef,
     closeWebRTC,
     pcRef
   } = useWebRTC();
+
+  const isManual = appMode === 'manual';
+  
+  // Choose active signaling transport
+  const sendData = isManual ? manualSendData : trysteroSendData;
+  const activeDcRef = isManual ? manualDcRef : trysteroDcRef;
 
   const {
     transfers,
@@ -34,57 +56,119 @@ export default function App() {
     acceptFile,
     rejectFile,
     cancelTransfer
-  } = useFileTransfer(sendData, dataChannelRef, pcRef);
+  } = useFileTransfer(sendData, activeDcRef, isManual ? pcRef : { current: null });
+
+  // Route messages to file transfer handler
+  function handleMessageOuter(data: string | ArrayBuffer) {
+    handleMessage(data);
+  }
 
   useEffect(() => {
     onMessageRef.current = handleMessage;
   }, [handleMessage, onMessageRef]);
 
+  // Handle URL hash on load
   useEffect(() => {
-    if (webrtcState === 'connected') {
-      setAppState('connected');
-    } else if (webrtcState === 'disconnected' || webrtcState === 'failed') {
-      // Return to home on disconnect
-      if (appState === 'connected') {
-        alert("연결이 끊어졌습니다.");
-        setAppState('select_role');
+    const hash = window.location.hash;
+    if (hash.startsWith('#join=')) {
+      const code = hash.replace('#join=', '');
+      if (code) {
+        setInputCode(formatRoomCode(normalizeRoomCode(code)));
+        setAppMode('home');
       }
     }
-  }, [webrtcState, appState]);
+  }, []);
 
+  // Monitor Trystero state
+  useEffect(() => {
+    if (trysteroState === 'connected') {
+      setAppMode('connected');
+    } else if (trysteroState === 'disconnected' || trysteroState === 'failed') {
+      if (appMode === 'connected') {
+        alert("연결이 끊어졌습니다.");
+        setAppMode('home');
+      }
+    }
+  }, [trysteroState, appMode]);
+
+  // Monitor Manual state
+  useEffect(() => {
+    if (webrtcState === 'connected' && isManual) {
+      setAppMode('connected');
+    } else if ((webrtcState === 'disconnected' || webrtcState === 'failed') && isManual) {
+      if (appMode === 'connected') {
+        alert("수동 연결이 끊어졌습니다.");
+        setAppMode('home');
+      }
+    }
+  }, [webrtcState, isManual, appMode]);
+
+  const handleCreateRoom = () => {
+    const code = generateRoomCode();
+    setRoomCode(code);
+    setAppMode('room');
+    initRoom(code, true);
+    generateQR(code);
+  };
+
+  const handleJoinRoom = () => {
+    const normalized = normalizeRoomCode(inputCode);
+    if (normalized.length < 4) return;
+    setRoomCode(formatRoomCode(normalized));
+    setAppMode('room');
+    initRoom(normalized, false);
+  };
+
+  const handleCancelRoom = () => {
+    disconnectTrystero();
+    setAppMode('home');
+    setRoomCode('');
+    setInputCode('');
+  };
+
+  // Manual Handlers
   const handleCreateOffer = async () => {
-    setAppState('creating_offer');
+    setManualState('creating_offer');
     const offer = await createOffer();
     if (offer) {
       setOfferStr(offer);
-      setAppState('show_offer');
-      generateQR(offer);
+      setManualState('show_offer');
+      generateManualQR(offer);
     } else {
-      setAppState('select_role');
+      setManualState('idle');
     }
   };
 
   const handleApplyOffer = async () => {
-    if (!inputStr.trim()) return;
-    setAppState('creating_answer');
-    const answer = await applyOfferAndCreateAnswer(inputStr.trim());
+    if (!manualInputStr.trim()) return;
+    setManualState('creating_answer');
+    const answer = await applyOfferAndCreateAnswer(manualInputStr.trim());
     if (answer) {
       setAnswerStr(answer);
-      setAppState('show_answer');
-      generateQR(answer);
+      setManualState('show_answer');
+      generateManualQR(answer);
     } else {
-      setAppState('enter_offer');
+      setManualState('enter_offer');
     }
   };
 
   const handleApplyAnswer = async () => {
-    if (!inputStr.trim()) return;
-    await applyAnswer(inputStr.trim());
+    if (!manualInputStr.trim()) return;
+    await applyAnswer(manualInputStr.trim());
   };
 
-  const generateQR = async (text: string) => {
+  const generateQR = async (code: string) => {
     try {
-      // Check if text is too large for QR
+      const joinUrl = `${window.location.origin}${window.location.pathname}#join=${code}`;
+      const url = await QRCode.toDataURL(joinUrl, { width: 200, margin: 2, color: { dark: '#0f172a', light: '#ffffff' } });
+      setQrUrl(url);
+    } catch (e) {
+      console.warn('QR 생성 실패', e);
+    }
+  };
+
+  const generateManualQR = async (text: string) => {
+    try {
       if (text.length > 2000) {
         setQrUrl('');
         return;
@@ -92,13 +176,14 @@ export default function App() {
       const url = await QRCode.toDataURL(text, { width: 250, margin: 2, color: { dark: '#0f172a', light: '#ffffff' } });
       setQrUrl(url);
     } catch (e) {
-      console.warn('QR 생성 실패 (용량 초과 가능성)', e);
+      console.warn('QR 생성 실패', e);
       setQrUrl('');
     }
   };
 
-  const handleCopy = (text: string) => {
-    navigator.clipboard.writeText(text);
+  const handleCopy = (text: string, isUrl = false) => {
+    const textToCopy = isUrl ? `${window.location.origin}${window.location.pathname}#join=${text}` : text;
+    navigator.clipboard.writeText(textToCopy);
     alert('클립보드에 복사되었습니다.');
   };
 
@@ -118,18 +203,10 @@ export default function App() {
       const reader = new FileReader();
       reader.onload = (ev) => {
         const text = ev.target?.result as string;
-        setInputStr(text);
+        setManualInputStr(text);
       };
       reader.readAsText(file);
     }
-  };
-
-  const handleCancel = () => {
-    closeWebRTC();
-    setAppState('select_role');
-    setOfferStr('');
-    setAnswerStr('');
-    setInputStr('');
   };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -151,150 +228,190 @@ export default function App() {
         }}>
           DropZone
         </h1>
-        <p className="text-muted mt-2">서버 없는 완전 P2P 파일 전송</p>
+        <p className="text-muted mt-2">서버 없이 간편한 P2P 파일 전송</p>
       </header>
 
-      {errorMsg && (
+      {(trysteroError || manualError) && (
         <div className="mb-4 glass-panel" style={{ padding: '1rem', background: 'rgba(239, 68, 68, 0.1)', borderColor: 'var(--danger-color)' }}>
           <div className="flex items-center gap-2 text-danger">
             <AlertTriangle size={20} />
-            <span>{errorMsg}</span>
+            <span>{trysteroError || manualError}</span>
           </div>
         </div>
       )}
 
-      {appState === 'select_role' && (
+      {appMode === 'home' && (
         <div className="glass-panel text-center">
-          <div className="flex flex-col gap-4" style={{ display: 'flex', flexDirection: 'column' }}>
-            <button className="btn w-full" onClick={handleCreateOffer} style={{ padding: '1.5rem', fontSize: '1.25rem' }}>
-              새 연결 만들기 (보내는/받는 쪽 모두 가능)
+          <div className="flex flex-col gap-6" style={{ display: 'flex', flexDirection: 'column' }}>
+            <button className="btn w-full" onClick={handleCreateRoom} style={{ padding: '1.5rem', fontSize: '1.25rem' }}>
+              방 만들기 (새 접속 코드 발급)
             </button>
-            <div className="text-muted text-sm my-2">또는</div>
-            <button className="btn btn-secondary w-full" onClick={() => { setAppState('enter_offer'); setInputStr(''); }} style={{ padding: '1.5rem', fontSize: '1.25rem' }}>
-              상대방 연결 정보 가져오기
-            </button>
-          </div>
-        </div>
-      )}
-
-      {(appState === 'creating_offer' || appState === 'creating_answer') && (
-        <div className="glass-panel text-center py-12">
-          <Clock size={48} className="mx-auto mb-4 animate-pulse" style={{ color: 'var(--primary-color)', margin: '0 auto' }} />
-          <h2 className="text-xl">연결 정보(ICE) 수집 중...</h2>
-          <p className="text-muted mt-2">최대 10초가 소요될 수 있습니다.</p>
-        </div>
-      )}
-
-      {appState === 'show_offer' && (
-        <div className="glass-panel">
-          <h2 className="text-2xl mb-4 text-center">1. 상대방에게 전달하세요 (Offer)</h2>
-          
-          <div className="flex justify-center mb-6">
-            {qrUrl ? (
-              <img src={qrUrl} alt="QR Code" style={{ borderRadius: '12px' }} />
-            ) : (
-              <div className="text-muted p-8 border border-dashed rounded text-center">
-                데이터가 커서 QR코드를 생성할 수 없습니다.<br/>아래 텍스트 복사나 파일 저장을 이용하세요.
-              </div>
-            )}
-          </div>
-
-          <div className="flex gap-2 mb-8 justify-center">
-            <button className="btn btn-secondary" onClick={() => handleCopy(offerStr)}>
-              <Copy size={18} /> 문자열 복사
-            </button>
-            <button className="btn btn-secondary" onClick={() => handleDownloadFile(offerStr, 'offer.txt')}>
-              <Download size={18} /> 파일 저장
-            </button>
-          </div>
-
-          <hr style={{ borderColor: 'var(--glass-border)', margin: '2rem 0' }} />
-
-          <h2 className="text-xl mb-4 text-center">2. 상대방의 응답(Answer)을 입력하세요</h2>
-          <div className="input-group">
-            <textarea 
-              className="input-field" 
-              rows={4} 
-              placeholder="상대방이 생성한 Answer 텍스트를 붙여넣으세요..."
-              value={inputStr}
-              onChange={e => setInputStr(e.target.value)}
-            />
-          </div>
-          <div className="flex gap-2 mb-4 justify-between">
-            <div className="flex gap-2">
-              <label className="btn btn-secondary cursor-pointer" style={{ cursor: 'pointer' }}>
-                <Upload size={18} /> 파일 읽기
-                <input type="file" style={{ display: 'none' }} accept=".txt" onChange={handleFileUpload} />
-              </label>
+            
+            <div className="relative flex items-center justify-center my-2">
+              <div style={{ borderTop: '1px solid var(--glass-border)', width: '100%', position: 'absolute' }}></div>
+              <span style={{ background: 'var(--panel-bg)', padding: '0 1rem', position: 'relative', color: 'var(--text-muted)' }}>
+                또는 참여하기
+              </span>
             </div>
-            <button className="btn" onClick={handleApplyAnswer} disabled={!inputStr.trim()}>
-              연결 시작 <Send size={18} />
-            </button>
+
+            <div className="input-group">
+              <input 
+                type="text" 
+                className="input-field text-center text-2xl" 
+                placeholder="XXXX-XXXX" 
+                value={inputCode}
+                onChange={(e) => {
+                  const val = normalizeRoomCode(e.target.value);
+                  setInputCode(formatRoomCode(val));
+                }}
+                maxLength={9}
+                style={{ letterSpacing: '0.2rem' }}
+              />
+              <button 
+                className="btn w-full mt-4" 
+                onClick={handleJoinRoom} 
+                disabled={normalizeRoomCode(inputCode).length < 4}
+              >
+                접속 코드로 연결하기
+              </button>
+            </div>
+            
+            <div className="mt-8 text-right">
+              <button 
+                className="btn btn-secondary" 
+                onClick={() => setAppMode('manual')}
+                style={{ fontSize: '0.875rem', padding: '0.5rem 1rem' }}
+              >
+                <Settings size={14} /> 고급 수동 연결 (오프라인/트래커 장애 시)
+              </button>
+            </div>
           </div>
-          <button className="btn btn-danger w-full mt-4" onClick={handleCancel}>취소</button>
         </div>
       )}
 
-      {appState === 'enter_offer' && (
-        <div className="glass-panel">
-          <h2 className="text-2xl mb-4 text-center">상대방의 연결 정보(Offer) 입력</h2>
-          <div className="input-group">
-            <textarea 
-              className="input-field" 
-              rows={5} 
-              placeholder="상대방이 보낸 Offer 텍스트를 붙여넣으세요..."
-              value={inputStr}
-              onChange={e => setInputStr(e.target.value)}
-            />
+      {appMode === 'room' && (
+        <div className="glass-panel text-center">
+          <h2 className="text-xl text-muted mb-2">접속 코드</h2>
+          <div className="text-4xl mb-6" style={{ letterSpacing: '0.3rem', fontWeight: 800 }}>
+            {roomCode}
           </div>
-          <div className="flex gap-2 mb-8 justify-between">
-            <label className="btn btn-secondary cursor-pointer" style={{ cursor: 'pointer' }}>
-              <Upload size={18} /> 파일 읽기
-              <input type="file" style={{ display: 'none' }} accept=".txt" onChange={handleFileUpload} />
-            </label>
-            <button className="btn" onClick={handleApplyOffer} disabled={!inputStr.trim()}>
-              확인
-            </button>
-          </div>
-          <button className="btn btn-secondary w-full" onClick={handleCancel}>돌아가기</button>
-        </div>
-      )}
-
-      {appState === 'show_answer' && (
-        <div className="glass-panel">
-          <h2 className="text-2xl mb-4 text-center">응답(Answer) 생성 완료</h2>
-          <p className="text-center text-muted mb-6">아래 정보를 방을 만든 사람에게 전달하세요.</p>
           
           <div className="flex justify-center mb-6">
-            {qrUrl ? (
-              <img src={qrUrl} alt="QR Code" style={{ borderRadius: '12px' }} />
-            ) : (
-              <div className="text-muted p-8 border border-dashed rounded text-center">
-                데이터가 커서 QR코드를 생성할 수 없습니다.<br/>아래 텍스트 복사나 파일 저장을 이용하세요.
-              </div>
+            {qrUrl && (
+              <img src={qrUrl} alt="QR Code" style={{ borderRadius: '12px', background: 'white', padding: '0.5rem' }} />
             )}
           </div>
-
-          <div className="flex gap-2 mb-8 justify-center">
-            <button className="btn btn-secondary" onClick={() => handleCopy(answerStr)}>
-              <Copy size={18} /> 문자열 복사
+          
+          <div className="flex justify-center gap-2 mb-8">
+            <button className="btn btn-secondary" onClick={() => handleCopy(normalizeRoomCode(roomCode))}>
+              <Copy size={18} /> 코드 복사
             </button>
-            <button className="btn btn-secondary" onClick={() => handleDownloadFile(answerStr, 'answer.txt')}>
-              <Download size={18} /> 파일 저장
+            <button className="btn btn-secondary" onClick={() => handleCopy(normalizeRoomCode(roomCode), true)}>
+              <LinkIcon size={18} /> 공유 링크 복사
             </button>
           </div>
-          <p className="text-center text-muted text-sm">상대방이 확인하면 자동으로 파일 전송 화면으로 이동합니다.</p>
-          <button className="btn btn-danger w-full mt-4" onClick={handleCancel}>취소</button>
+
+          <div className="flex flex-col items-center justify-center py-6 border border-dashed rounded" style={{ borderColor: 'var(--glass-border)', background: 'rgba(255,255,255,0.02)' }}>
+            {trysteroState === 'joining' && <p>트래커 접속 중...</p>}
+            {trysteroState === 'waiting' && <><Clock size={32} className="animate-pulse mb-2 text-primary" /><p>상대방을 기다리고 있습니다...</p></>}
+            {trysteroState === 'connecting' && <p className="text-success">피어 발견! P2P 연결 중...</p>}
+          </div>
+
+          <button className="btn btn-danger w-full mt-6" onClick={handleCancelRoom}>취소</button>
         </div>
       )}
 
-      {appState === 'connected' && (
+      {appMode === 'manual' && (
+        <div className="glass-panel text-center">
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-xl">고급 수동 연결 모드</h2>
+            <button className="btn btn-secondary" onClick={() => { setAppMode('home'); closeWebRTC(); setManualState('idle'); }} style={{ padding: '0.5rem' }}>
+              돌아가기
+            </button>
+          </div>
+          
+          {manualState === 'idle' && (
+            <div className="flex flex-col gap-4">
+              <button className="btn w-full" onClick={handleCreateOffer}>
+                새 연결 만들기 (보내는/받는 쪽 모두 가능)
+              </button>
+              <div className="text-muted text-sm my-2">또는</div>
+              <button className="btn btn-secondary w-full" onClick={() => { setManualState('enter_offer'); setManualInputStr(''); }}>
+                상대방 연결 정보 가져오기
+              </button>
+            </div>
+          )}
+
+          {(manualState === 'creating_offer' || manualState === 'creating_answer') && (
+            <div className="py-12">
+              <Clock size={48} className="mx-auto mb-4 animate-pulse" style={{ color: 'var(--primary-color)' }} />
+              <h2 className="text-xl">연결 정보(ICE) 수집 중...</h2>
+              <p className="text-muted mt-2">최대 10초가 소요될 수 있습니다.</p>
+            </div>
+          )}
+
+          {manualState === 'show_offer' && (
+            <div className="text-left">
+              <h2 className="text-xl mb-4 text-center">1. 상대방에게 전달하세요 (Offer)</h2>
+              <div className="flex justify-center mb-6">
+                {qrUrl ? <img src={qrUrl} alt="QR" style={{ borderRadius: '12px' }} /> : <div className="text-muted p-4 text-center">용량 초과로 QR 불가</div>}
+              </div>
+              <div className="flex gap-2 mb-8 justify-center">
+                <button className="btn btn-secondary" onClick={() => handleCopy(offerStr)}>문자열 복사</button>
+                <button className="btn btn-secondary" onClick={() => handleDownloadFile(offerStr, 'offer.txt')}>파일 저장</button>
+              </div>
+              <hr style={{ borderColor: 'var(--glass-border)', margin: '2rem 0' }} />
+              <h2 className="text-lg mb-2 text-center">2. 상대방의 응답(Answer) 입력</h2>
+              <textarea className="input-field mb-2" rows={4} value={manualInputStr} onChange={e => setManualInputStr(e.target.value)} />
+              <div className="flex gap-2 justify-between">
+                <label className="btn btn-secondary cursor-pointer">파일 읽기<input type="file" style={{ display: 'none' }} accept=".txt" onChange={handleFileUpload} /></label>
+                <button className="btn" onClick={handleApplyAnswer} disabled={!manualInputStr.trim()}>연결 시작</button>
+              </div>
+            </div>
+          )}
+
+          {manualState === 'enter_offer' && (
+            <div className="text-left">
+              <h2 className="text-xl mb-4 text-center">상대방의 연결 정보(Offer) 입력</h2>
+              <textarea className="input-field mb-4" rows={5} value={manualInputStr} onChange={e => setManualInputStr(e.target.value)} />
+              <div className="flex gap-2 justify-between">
+                <label className="btn btn-secondary cursor-pointer">파일 읽기<input type="file" style={{ display: 'none' }} accept=".txt" onChange={handleFileUpload} /></label>
+                <button className="btn" onClick={handleApplyOffer} disabled={!manualInputStr.trim()}>확인</button>
+              </div>
+            </div>
+          )}
+
+          {manualState === 'show_answer' && (
+            <div className="text-left">
+              <h2 className="text-xl mb-4 text-center">응답(Answer) 생성 완료</h2>
+              <p className="text-center text-muted mb-4">방을 만든 사람에게 전달하세요.</p>
+              <div className="flex justify-center mb-4">
+                {qrUrl ? <img src={qrUrl} alt="QR" style={{ borderRadius: '12px' }} /> : <div className="text-muted">QR 불가</div>}
+              </div>
+              <div className="flex gap-2 justify-center">
+                <button className="btn btn-secondary" onClick={() => handleCopy(answerStr)}>문자열 복사</button>
+                <button className="btn btn-secondary" onClick={() => handleDownloadFile(answerStr, 'answer.txt')}>파일 저장</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {appMode === 'connected' && (
         <div className="glass-panel">
           <div className="flex justify-between items-center mb-8">
-            <h2 className="text-2xl text-success flex items-center gap-2">
-              <CheckCircle /> 연결됨
-            </h2>
-            <button className="btn btn-danger" onClick={handleCancel}>
+            <div className="flex items-center gap-2">
+              <h2 className="text-2xl text-success flex items-center gap-2">
+                <CheckCircle /> 연결됨
+              </h2>
+              {roomCode && <span className="badge info">{roomCode} 방</span>}
+              {isManual && <span className="badge warning">수동 연결됨</span>}
+            </div>
+            <button className="btn btn-danger" onClick={() => {
+              if (isManual) { closeWebRTC(); setManualState('idle'); }
+              else disconnectTrystero();
+              setAppMode('home');
+            }}>
               연결 종료
             </button>
           </div>
