@@ -455,7 +455,7 @@ export default function App() {
         <p>같은 Wi-Fi나 로컬 네트워크 사용을 권장합니다.</p>
         
         <div className="mt-6 flex flex-col items-center gap-2" style={{ opacity: 0.7 }}>
-          <img src="https://hits.seeyoufarm.com/api/count/incr/badge.svg?url=https%3A%2F%2Flibralightluda.github.io%2FFileShare&count_bg=%2379C83D&title_bg=%23555555&icon=&icon_color=%23E7E7E7&title=hits&edge_flat=false" alt="Hits" />
+          <img src="https://visitor-badge.laobi.icu/badge?page_id=LibraLightLuda.FileShare" alt="Hits" />
           <div className="text-xs">
             v{__APP_VERSION__} ({__BUILD_DATE__})
           </div>

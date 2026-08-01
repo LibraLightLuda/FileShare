@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { joinRoom, type Room } from '@trystero-p2p/torrent';
 import { getRandomTrackers, hashRoomId } from '../utils/trystero';
+import { DEFAULT_ICE_SERVERS } from '../utils/config';
 
 export type TrysteroState = 'idle' | 'joining' | 'waiting' | 'connecting' | 'connected' | 'disconnected' | 'failed' | 'error';
 
@@ -23,11 +24,14 @@ export function useTrystero(onMessageReceived: (data: string | ArrayBuffer) => v
       dcRef.current.close();
       dcRef.current = null;
     }
+    if (pcRef.current) {
+      pcRef.current.close();
+      pcRef.current = null;
+    }
     if (roomRef.current) {
       roomRef.current.leave();
       roomRef.current = null;
     }
-    pcRef.current = null;
     remotePeerIdRef.current = null;
     setConnectionState('idle');
   }, []);
@@ -49,8 +53,10 @@ export function useTrystero(onMessageReceived: (data: string | ArrayBuffer) => v
         setConnectionState('connecting');
       }
 
-      room.onPeerJoin = (peerId: string) => {
-        // 방에 이미 다른 피어가 연결되어 있다면 세 번째 피어는 거절/무시
+      // Trystero action to exchange our own WebRTC SDP and ICE candidates
+      const signalAction = room.makeAction('webrtc-signal');
+
+      room.onPeerJoin = async (peerId: string) => {
         if (remotePeerIdRef.current && remotePeerIdRef.current !== peerId) {
           console.warn('Third peer tried to join, ignoring:', peerId);
           return;
@@ -59,12 +65,11 @@ export function useTrystero(onMessageReceived: (data: string | ArrayBuffer) => v
         remotePeerIdRef.current = peerId;
         setConnectionState('connecting');
 
-        // Trystero가 생성한 RTCPeerConnection 추출
-        const pc = room.getPeers()[peerId];
-        if (!pc) return;
-        
+        // Create our own custom WebRTC connection
+        const pc = new RTCPeerConnection({ iceServers: DEFAULT_ICE_SERVERS });
         pcRef.current = pc;
 
+        // Setup custom DataChannel
         const setupDc = (dc: RTCDataChannel) => {
           dcRef.current = dc;
           dc.binaryType = 'arraybuffer';
@@ -76,19 +81,14 @@ export function useTrystero(onMessageReceived: (data: string | ArrayBuffer) => v
           };
 
           dc.onopen = () => {
-            console.log('[Trystero] DataChannel onopen fired');
             setConnectionState('connected');
           };
-
           if (dc.readyState === 'open') {
-            console.log('[Trystero] DataChannel already open upon creation');
             setConnectionState('connected');
           }
-
           dc.onclose = () => {
             setConnectionState('disconnected');
           };
-
           dc.onerror = () => {
             setConnectionState('failed');
             setErrorMessage('데이터 채널 오류가 발생했습니다.');
@@ -96,23 +96,55 @@ export function useTrystero(onMessageReceived: (data: string | ArrayBuffer) => v
         };
 
         if (isInitiator) {
-          // Initiator explicitly creates the channel, which triggers renegotiation
           const dc = pc.createDataChannel('fileTransfer');
           setupDc(dc);
         } else {
-          // Answerer waits for the incoming channel
-          pc.addEventListener('datachannel', (event) => {
+          pc.ondatachannel = (event) => {
             if (event.channel.label === 'fileTransfer') {
               setupDc(event.channel);
             }
-          });
+          };
         }
+
+        pc.onicecandidate = (event) => {
+          if (event.candidate) {
+            signalAction.send({ type: 'candidate', candidate: event.candidate.toJSON() } as any, { target: peerId });
+          }
+        };
 
         pc.onconnectionstatechange = () => {
           if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed' || pc.connectionState === 'closed') {
             setConnectionState('disconnected');
           }
         };
+
+        if (isInitiator) {
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          signalAction.send({ type: 'offer', sdp: { type: offer.type, sdp: offer.sdp } } as any, { target: peerId });
+        }
+      };
+
+      signalAction.onMessage = async (data: any, context: any) => {
+        const peerId = context.id || context.peerId || context; // handle different contexts based on API version
+        if (remotePeerIdRef.current !== peerId) return;
+        const pc = pcRef.current;
+        if (!pc) return;
+
+        try {
+          if (data.type === 'offer') {
+            await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            signalAction.send({ type: 'answer', sdp: { type: answer.type, sdp: answer.sdp } } as any, { target: peerId });
+          } else if (data.type === 'answer') {
+            await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+          } else if (data.type === 'candidate') {
+            await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+          }
+        } catch (err) {
+          console.error("Failed to process signal", err);
+        }
       };
 
       room.onPeerLeave = (peerId: string) => {
