@@ -84,25 +84,28 @@ export default function App() {
     if (trysteroState === 'connected') {
       setAppMode('connected');
     } else if (trysteroState === 'disconnected' || trysteroState === 'failed') {
-      if (appMode === 'connected') {
-        alert("연결이 끊어졌습니다.");
+      if (appMode === 'connected' || appMode === 'room') {
+        alert("상대방과의 연결이 끊어졌습니다.");
+        trysteroDisconnect();
         setAppMode('home');
       }
     }
-  }, [trysteroState, appMode]);
+  }, [trysteroState, appMode, trysteroDisconnect]);
 
   // Monitor Manual state
   useEffect(() => {
     // If appMode is connected and webrtcState disconnects, return to home
     if ((webrtcState === 'disconnected' || webrtcState === 'failed')) {
       if (appMode === 'connected' && manualDcRef.current) {
-        alert("수동 연결이 끊어졌습니다.");
+        alert("상대방과의 수동 연결이 끊어졌습니다.");
+        closeWebRTC();
+        setManualState('idle');
         setAppMode('home');
       }
     } else if (webrtcState === 'connected' && appMode === 'manual') {
       setAppMode('connected');
     }
-  }, [webrtcState, appMode, manualDcRef]);
+  }, [webrtcState, appMode, manualDcRef, closeWebRTC]);
 
   const handleCreateRoom = () => {
     const code = generateRoomCode();
