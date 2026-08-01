@@ -227,7 +227,7 @@ export default function App() {
           WebkitTextFillColor: 'transparent',
           display: 'inline-block'
         }}>
-          DropZone
+          FileShare
         </h1>
         <p className="text-muted mt-2">서버 없이 간편한 P2P 파일 전송</p>
       </header>
@@ -450,6 +450,13 @@ export default function App() {
       <footer className="mt-8 text-center text-sm text-muted">
         <p>서버를 거치지 않고 연결된 기기 간 직접 데이터를 교환합니다.</p>
         <p>같은 Wi-Fi나 로컬 네트워크 사용을 권장합니다.</p>
+        
+        <div className="mt-6 flex flex-col items-center gap-2" style={{ opacity: 0.7 }}>
+          <img src="https://hits.seeyoufarm.com/api/count/incr/badge.svg?url=https%3A%2F%2Flibralightluda.github.io%2FFileShare&count_bg=%2379C83D&title_bg=%23555555&icon=&icon_color=%23E7E7E7&title=hits&edge_flat=false" alt="Hits" />
+          <div className="text-xs">
+            v{__APP_VERSION__} ({__BUILD_DATE__})
+          </div>
+        </div>
       </footer>
     </div>
   );
