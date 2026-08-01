@@ -86,11 +86,11 @@ export default function App() {
     } else if (trysteroState === 'disconnected' || trysteroState === 'failed') {
       if (appMode === 'connected' || appMode === 'room') {
         alert("상대방과의 연결이 끊어졌습니다.");
-        trysteroDisconnect();
+        disconnectTrystero();
         setAppMode('home');
       }
     }
-  }, [trysteroState, appMode, trysteroDisconnect]);
+  }, [trysteroState, appMode, disconnectTrystero]);
 
   // Monitor Manual state
   useEffect(() => {
