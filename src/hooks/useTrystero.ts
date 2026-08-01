@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { joinRoom, type Room } from 'trystero/torrent';
+import { joinRoom, type Room } from '@trystero-p2p/torrent';
 import { getRandomTrackers, hashRoomId } from '../utils/trystero';
 
 export type TrysteroState = 'idle' | 'joining' | 'waiting' | 'connecting' | 'connected' | 'disconnected' | 'failed' | 'error';
@@ -40,7 +40,7 @@ export function useTrystero(onMessageReceived: (data: string | ArrayBuffer) => v
     try {
       const roomId = await hashRoomId(normalizedCode);
       const trackerUrls = getRandomTrackers(3);
-      const room = joinRoom({ appId: 'fileshare:v1', trackerUrls }, roomId);
+      const room = joinRoom({ appId: 'fileshare:v1', relayConfig: { urls: trackerUrls } }, roomId);
       roomRef.current = room;
 
       if (isInitiator) {
@@ -49,7 +49,7 @@ export function useTrystero(onMessageReceived: (data: string | ArrayBuffer) => v
         setConnectionState('connecting');
       }
 
-      room.onPeerJoin((peerId: string) => {
+      room.onPeerJoin = (peerId: string) => {
         // 방에 이미 다른 피어가 연결되어 있다면 세 번째 피어는 거절/무시
         if (remotePeerIdRef.current && remotePeerIdRef.current !== peerId) {
           console.warn('Third peer tried to join, ignoring:', peerId);
@@ -99,14 +99,14 @@ export function useTrystero(onMessageReceived: (data: string | ArrayBuffer) => v
             setConnectionState('disconnected');
           }
         };
-      });
+      };
 
-      room.onPeerLeave((peerId: string) => {
+      room.onPeerLeave = (peerId: string) => {
         if (remotePeerIdRef.current === peerId) {
           setConnectionState('disconnected');
           remotePeerIdRef.current = null;
         }
-      });
+      };
 
     } catch (err: any) {
       setConnectionState('error');
