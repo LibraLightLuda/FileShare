@@ -1,0 +1,19 @@
+- [x] Phase 1: 기반 설정 및 패키징 모듈
+  - [x] 프로젝트 최상단 Vite React 초기화
+  - [x] 상태 머신 기반 UI 라우팅 구조 구성
+  - [x] `CompressionStream` 및 `pako` 폴백을 적용한 인코딩 로직 구현 (`encoding` 필드 적용)
+- [x] Phase 2: 시그널링 상태 머신 및 UI
+  - [x] ICE Gathering 대기 로직 (10초 타임아웃, 예외 처리)
+  - [x] sessionId, createdAt, type 검증을 포함한 패키지 적용 로직
+  - [x] QR 코드 생성 선택적 적용 및 문자열/파일 교환 UI
+- [x] Phase 3: P2P 파일 전송 
+  - [x] `sctp.maxMessageSize` 기반 동적 Chunk Size 설정 및 16KB 폴백
+  - [x] 25 bytes 바이너리 헤더 및 백프레셔 적용
+  - [x] 파일 순차 전송 큐 구현 및 `FILE_VERIFIED` 완료 동기화
+- [x] Phase 4: UI/UX 고도화 및 오류 처리
+  - [x] 메모리 한계 / TURN 미사용 주의 / 전송 취소 안내 UI
+  - [x] 250MB 제한 처리 및 반응형 디자인
+- [ ] Phase 5: 검증 및 마무리
+  - [ ] 단계별 용량 / 크로스 브라우징 / 네트워크 끊김 단위·수동 테스트
+  - [ ] GitHub Pages 정적 배포 자동화 (Actions)
+  - [ ] 최종 결과 보고 및 README 워크스루 작성
