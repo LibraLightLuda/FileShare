@@ -49,7 +49,7 @@ export function useTrystero(onMessageReceived: (data: string | ArrayBuffer) => v
         setConnectionState('connecting');
       }
 
-      room.onPeerJoin((peerId) => {
+      room.onPeerJoin((peerId: string) => {
         // 방에 이미 다른 피어가 연결되어 있다면 세 번째 피어는 거절/무시
         if (remotePeerIdRef.current && remotePeerIdRef.current !== peerId) {
           console.warn('Third peer tried to join, ignoring:', peerId);
@@ -75,7 +75,7 @@ export function useTrystero(onMessageReceived: (data: string | ArrayBuffer) => v
         dcRef.current = dc;
         dc.binaryType = 'arraybuffer';
         
-        dc.onmessage = (e) => {
+        dc.onmessage = (e: any) => {
           if (onMessageRef.current) {
             onMessageRef.current(e.data);
           }
@@ -101,7 +101,7 @@ export function useTrystero(onMessageReceived: (data: string | ArrayBuffer) => v
         };
       });
 
-      room.onPeerLeave((peerId) => {
+      room.onPeerLeave((peerId: string) => {
         if (remotePeerIdRef.current === peerId) {
           setConnectionState('disconnected');
           remotePeerIdRef.current = null;

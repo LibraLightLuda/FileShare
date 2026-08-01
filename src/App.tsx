@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Copy, Upload, Download, CheckCircle, XCircle, File as FileIcon, Clock, AlertTriangle, Send, Link as LinkIcon, Settings } from 'lucide-react';
+import { Copy, CheckCircle, XCircle, File as FileIcon, Clock, AlertTriangle, Link as LinkIcon, Settings } from 'lucide-react';
 import QRCode from 'qrcode';
 import { useTrystero } from './hooks/useTrystero';
 import { useWebRTC } from './hooks/useWebRTC';
@@ -93,15 +93,16 @@ export default function App() {
 
   // Monitor Manual state
   useEffect(() => {
-    if (webrtcState === 'connected' && isManual) {
-      setAppMode('connected');
-    } else if ((webrtcState === 'disconnected' || webrtcState === 'failed') && isManual) {
-      if (appMode === 'connected') {
+    // If appMode is connected and webrtcState disconnects, return to home
+    if ((webrtcState === 'disconnected' || webrtcState === 'failed')) {
+      if (appMode === 'connected' && manualDcRef.current) {
         alert("수동 연결이 끊어졌습니다.");
         setAppMode('home');
       }
+    } else if (webrtcState === 'connected' && appMode === 'manual') {
+      setAppMode('connected');
     }
-  }, [webrtcState, isManual, appMode]);
+  }, [webrtcState, appMode, manualDcRef]);
 
   const handleCreateRoom = () => {
     const code = generateRoomCode();
