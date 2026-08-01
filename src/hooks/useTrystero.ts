@@ -13,6 +13,7 @@ export function useTrystero(onMessageReceived: (data: string | ArrayBuffer) => v
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const dcRef = useRef<RTCDataChannel | null>(null);
   const remotePeerIdRef = useRef<string | null>(null);
+  const pendingIceCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
   const onMessageRef = useRef<((data: string | ArrayBuffer) => void) | undefined>(undefined);
 
   useEffect(() => {
@@ -33,6 +34,7 @@ export function useTrystero(onMessageReceived: (data: string | ArrayBuffer) => v
       roomRef.current = null;
     }
     remotePeerIdRef.current = null;
+    pendingIceCandidatesRef.current = [];
     setConnectionState('idle');
   }, []);
 
@@ -56,20 +58,15 @@ export function useTrystero(onMessageReceived: (data: string | ArrayBuffer) => v
       // Trystero action to exchange our own WebRTC SDP and ICE candidates
       const signalAction = room.makeAction('webrtc-signal');
 
-      room.onPeerJoin = async (peerId: string) => {
-        if (remotePeerIdRef.current && remotePeerIdRef.current !== peerId) {
-          console.warn('Third peer tried to join, ignoring:', peerId);
-          return;
-        }
-        
+      const createOrGetPeerConnection = (peerId: string) => {
+        if (pcRef.current) return pcRef.current;
+
         remotePeerIdRef.current = peerId;
         setConnectionState('connecting');
 
-        // Create our own custom WebRTC connection
         const pc = new RTCPeerConnection({ iceServers: DEFAULT_ICE_SERVERS });
         pcRef.current = pc;
 
-        // Setup custom DataChannel
         const setupDc = (dc: RTCDataChannel) => {
           dcRef.current = dc;
           dc.binaryType = 'arraybuffer';
@@ -118,6 +115,17 @@ export function useTrystero(onMessageReceived: (data: string | ArrayBuffer) => v
           }
         };
 
+        return pc;
+      };
+
+      room.onPeerJoin = async (peerId: string) => {
+        if (remotePeerIdRef.current && remotePeerIdRef.current !== peerId) {
+          console.warn('Third peer tried to join, ignoring:', peerId);
+          return;
+        }
+        
+        const pc = createOrGetPeerConnection(peerId);
+
         if (isInitiator) {
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
@@ -126,21 +134,37 @@ export function useTrystero(onMessageReceived: (data: string | ArrayBuffer) => v
       };
 
       signalAction.onMessage = async (data: any, context: any) => {
-        const peerId = context.id || context.peerId || context; // handle different contexts based on API version
-        if (remotePeerIdRef.current !== peerId) return;
-        const pc = pcRef.current;
-        if (!pc) return;
+        const peerId = context?.peerId || context?.id || context;
+        if (!peerId) return;
+
+        if (remotePeerIdRef.current && remotePeerIdRef.current !== peerId) return;
+
+        const pc = createOrGetPeerConnection(peerId);
 
         try {
           if (data.type === 'offer') {
             await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+            // Flush queued ICE candidates
+            while (pendingIceCandidatesRef.current.length > 0) {
+              const candidate = pendingIceCandidatesRef.current.shift();
+              if (candidate) await pc.addIceCandidate(new RTCIceCandidate(candidate));
+            }
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
             signalAction.send({ type: 'answer', sdp: { type: answer.type, sdp: answer.sdp } } as any, { target: peerId });
           } else if (data.type === 'answer') {
             await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+            // Flush queued ICE candidates
+            while (pendingIceCandidatesRef.current.length > 0) {
+              const candidate = pendingIceCandidatesRef.current.shift();
+              if (candidate) await pc.addIceCandidate(new RTCIceCandidate(candidate));
+            }
           } else if (data.type === 'candidate') {
-            await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+            if (pc.remoteDescription && pc.remoteDescription.type) {
+              await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+            } else {
+              pendingIceCandidatesRef.current.push(data.candidate);
+            }
           }
         } catch (err) {
           console.error("Failed to process signal", err);

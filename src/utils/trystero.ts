@@ -10,11 +10,10 @@ const TRACKER_POOL = [
 ];
 
 /**
- * 트래커 풀에서 지정된 개수만큼 랜덤으로 트래커를 선택합니다.
+ * 모든 트래커를 동시에 사용하여 피어 간 교차 매칭 확률을 최대화합니다.
  */
-export function getRandomTrackers(count: number = 3): string[] {
-  const shuffled = [...TRACKER_POOL].sort(() => 0.5 - Math.random());
-  return shuffled.slice(0, count);
+export function getRandomTrackers(_count?: number): string[] {
+  return [...TRACKER_POOL];
 }
 
 /**
@@ -39,15 +38,14 @@ export function normalizeRoomCode(code: string): string {
   return code.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
 }
 
-export async function hashRoomId(normalizedCode: string): Promise<string> {
+export function hashRoomId(normalizedCode: string): Promise<string> {
   const encoder = new TextEncoder();
   const data = encoder.encode(`fileshare:v1:${normalizedCode}`);
   
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-  
-  return hashHex;
+  return crypto.subtle.digest('SHA-256', data).then(hashBuffer => {
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  });
 }
 
 export function formatRoomCode(normalizedCode: string): string {
