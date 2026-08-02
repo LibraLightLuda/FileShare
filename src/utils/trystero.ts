@@ -1,16 +1,14 @@
 // 공용 WebTorrent 트래커 풀
-const TRACKER_POOL = [
-  'wss://tracker.openwebtorrent.com',
-  'wss://tracker.files.fm:7073/announce',
+export const TRACKER_POOL = [
   'wss://tracker.webtorrent.dev',
+  'wss://tracker.files.fm:7073/announce',
   'wss://tracker.btorrent.xyz',
-  'wss://q.bandcamptracker.ru',
-  'wss://tracker.novage.com.ua',
-  'wss://tracker.sloppyta.co:443/announce'
+  'wss://tracker.openwebtorrent.com',
+  'wss://q.bandcamptracker.ru'
 ];
 
 /**
- * 모든 트래커를 동시에 사용하여 피어 간 교차 매칭 확률을 최대화합니다.
+ * 트래커 풀 리스트 반환 함수
  */
 export function getRandomTrackers(_count?: number): string[] {
   return [...TRACKER_POOL];
