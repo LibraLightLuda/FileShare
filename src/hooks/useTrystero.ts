@@ -45,7 +45,7 @@ export function useTrystero(onMessageReceived: (data: string | ArrayBuffer) => v
         appId: 'fileshare:v1',
         relayConfig: {
           urls: TRACKER_POOL,
-          redundancy: 3,
+          redundancy: TRACKER_POOL.length, // 등록된 모든 트래커에 동시에 접속하여 피어 교집합 100% 보장
           warnOnRelayFailure: false
         },
         rtcConfig: {
