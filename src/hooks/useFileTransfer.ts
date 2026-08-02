@@ -18,14 +18,11 @@ export interface TransferProgress {
   blob?: Blob;
 }
 
-const DEFAULT_CHUNK_SIZE = 16384; // 16KB fallback
 const MAX_ALLOWED_CHUNK_SIZE = 65536; // Cap chunk size to 64KB for smooth UI progress
 const PROTOCOL_VERSION = 1;
 
 export function useFileTransfer(
-  sendData: (data: string | ArrayBuffer) => void,
-  dataChannelRef: React.MutableRefObject<RTCDataChannel | null>,
-  pcRef: React.MutableRefObject<RTCPeerConnection | null>
+  sendData: (data: string | ArrayBuffer) => void
 ) {
   const [transfers, setTransfers] = useState<Record<string, TransferProgress>>({});
   
@@ -34,16 +31,8 @@ export function useFileTransfer(
   const receiveBuffers = useRef<Record<string, { chunks: ArrayBuffer[], receivedBytes: number, expectedSize: number }>>({});
   
   const getChunkSize = useCallback(() => {
-    const pc = pcRef.current;
-    if (pc && pc.sctp && pc.sctp.maxMessageSize) {
-      // Return min of maxMessageSize and our UI cap, but some browsers report 0 or Infinity for "unlimited"
-      const maxMsg = pc.sctp.maxMessageSize;
-      if (maxMsg > 0 && maxMsg < Infinity) {
-        return Math.min(maxMsg, MAX_ALLOWED_CHUNK_SIZE);
-      }
-    }
-    return DEFAULT_CHUNK_SIZE;
-  }, [pcRef]);
+    return MAX_ALLOWED_CHUNK_SIZE;
+  }, []);
 
   const processSendQueue = useCallback(async () => {
     if (activeSendTransferId.current) return; 
@@ -58,12 +47,8 @@ export function useFileTransfer(
 
     activeSendTransferId.current = nextTransferId;
     const queue = sendQueues.current[nextTransferId];
-    const dc = dataChannelRef.current;
-    
-    if (!dc || dc.readyState !== 'open') {
-      activeSendTransferId.current = null;
-      return;
-    }
+    // Trystero 네이티브 연결 상태는 sendData 가능 여부로 판단
+    // 데이터 채널은 Trystero 내부에 있으므로 여기서는 통과
 
     setTransfers(prev => ({
       ...prev,
@@ -74,20 +59,11 @@ export function useFileTransfer(
 
     const chunkSize = getChunkSize();
     // Header is 25 bytes, payload is up to chunkSize - 25
-    const maxPayloadLength = chunkSize - 25;
-    const bufferThreshold = maxPayloadLength * 16; 
+    const maxPayloadLength = chunkSize - 25; 
 
     let chunkIndex = 0;
     while (queue.offset < queue.file.size && !queue.cancelled) {
-      if (dc.bufferedAmount > bufferThreshold) {
-        dc.bufferedAmountLowThreshold = Math.max(0, bufferThreshold / 2);
-        await new Promise<void>(resolve => {
-          dc.onbufferedamountlow = () => {
-            dc.onbufferedamountlow = null;
-            resolve();
-          };
-        });
-      }
+      // Trystero action.send 내부에서 백프레셔를 관리하므로 수동 bufferedAmount 대기 불필요
       if (queue.cancelled) break;
 
       const end = Math.min(queue.offset + maxPayloadLength, queue.file.size);
@@ -119,7 +95,7 @@ export function useFileTransfer(
       combined.set(new Uint8Array(chunkBuffer), 25);
 
       try {
-        dc.send(combined.buffer);
+        await Promise.resolve(sendData(combined.buffer));
         queue.offset = end;
         chunkIndex++;
         
@@ -151,7 +127,7 @@ export function useFileTransfer(
 
     activeSendTransferId.current = null;
     setTimeout(processSendQueue, 50);
-  }, [transfers, sendData, dataChannelRef, getChunkSize]);
+  }, [transfers, sendData, getChunkSize]);
 
 
   const handleMessage = useCallback((data: string | ArrayBuffer) => {

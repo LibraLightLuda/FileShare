@@ -92,9 +92,9 @@ export function useTrystero(onMessageReceived: (data: string | ArrayBuffer) => v
     }
   }, [disconnect]);
 
-  const sendData = useCallback((data: string | ArrayBuffer) => {
+  const sendData = useCallback(async (data: string | ArrayBuffer) => {
     if (sendDataActionRef.current) {
-      sendDataActionRef.current(data);
+      await sendDataActionRef.current(data);
     } else {
       console.warn("[Trystero] Send action not ready");
     }

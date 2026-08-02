@@ -21,8 +21,7 @@ export default function App() {
     errorMessage: trysteroError,
     initRoom,
     disconnect: disconnectTrystero,
-    sendData: trysteroSendData,
-    dataChannelRef: trysteroDcRef
+    sendData: trysteroSendData
   } = useTrystero(handleMessageOuter);
 
   // Manual WebRTC (Fallback)
@@ -39,15 +38,12 @@ export default function App() {
     sendData: manualSendData,
     onMessageRef,
     dataChannelRef: manualDcRef,
-    closeWebRTC,
-    pcRef
+    closeWebRTC
   } = useWebRTC();
 
   const isManual = appMode === 'manual';
   
-  // Choose active signaling transport
   const sendData = isManual ? manualSendData : trysteroSendData;
-  const activeDcRef = isManual ? manualDcRef : trysteroDcRef;
 
   const {
     transfers,
@@ -56,7 +52,7 @@ export default function App() {
     acceptFile,
     rejectFile,
     cancelTransfer
-  } = useFileTransfer(sendData, activeDcRef, isManual ? pcRef : { current: null });
+  } = useFileTransfer(sendData);
 
   // Route messages to file transfer handler
   function handleMessageOuter(data: string | ArrayBuffer) {
