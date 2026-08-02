@@ -105,11 +105,13 @@ export function useTrystero(onMessageReceived: (data: string | ArrayBuffer) => v
 
         pc.onicecandidate = (event) => {
           if (event.candidate) {
+            // 수집된 ICE candidate 전송
             signalAction.send({ type: 'candidate', candidate: event.candidate.toJSON() } as any);
           }
         };
 
         pc.onconnectionstatechange = () => {
+          console.log(`[Trystero] PeerConnection state: ${pc.connectionState}`);
           if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed' || pc.connectionState === 'closed') {
             setConnectionState('disconnected');
           }
@@ -119,14 +121,16 @@ export function useTrystero(onMessageReceived: (data: string | ArrayBuffer) => v
       };
 
       room.onPeerJoin = async (peerId: string) => {
+        console.log(`[Trystero] Peer joined: ${peerId}`);
         if (remotePeerIdRef.current && remotePeerIdRef.current !== peerId) {
-          console.warn('Third peer tried to join, ignoring:', peerId);
+          console.warn('[Trystero] Third peer tried to join, ignoring:', peerId);
           return;
         }
         
         const pc = createOrGetPeerConnection(peerId);
 
         if (isInitiator) {
+          // 방 생성자(Initiator)가 새로운 피어 발견 시 SDP Offer 생성 및 전송
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
           signalAction.send({ type: 'offer', sdp: { type: offer.type, sdp: offer.sdp } } as any);
@@ -143,8 +147,9 @@ export function useTrystero(onMessageReceived: (data: string | ArrayBuffer) => v
 
         try {
           if (data.type === 'offer') {
+            // SDP Offer 수신 시 RemoteDescription 설정 후 Answer 응답 전송
             await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
-            // Flush queued ICE candidates
+            // 대기 중인 ICE 후보 추가
             while (pendingIceCandidatesRef.current.length > 0) {
               const candidate = pendingIceCandidatesRef.current.shift();
               if (candidate) await pc.addIceCandidate(new RTCIceCandidate(candidate));
@@ -153,13 +158,15 @@ export function useTrystero(onMessageReceived: (data: string | ArrayBuffer) => v
             await pc.setLocalDescription(answer);
             signalAction.send({ type: 'answer', sdp: { type: answer.type, sdp: answer.sdp } } as any);
           } else if (data.type === 'answer') {
+            // SDP Answer 수신 시 RemoteDescription 설정
             await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
-            // Flush queued ICE candidates
+            // 대기 중인 ICE 후보 추가
             while (pendingIceCandidatesRef.current.length > 0) {
               const candidate = pendingIceCandidatesRef.current.shift();
               if (candidate) await pc.addIceCandidate(new RTCIceCandidate(candidate));
             }
           } else if (data.type === 'candidate') {
+            // ICE Candidate 수신 처리
             if (pc.remoteDescription && pc.remoteDescription.type) {
               await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
             } else {
@@ -167,7 +174,7 @@ export function useTrystero(onMessageReceived: (data: string | ArrayBuffer) => v
             }
           }
         } catch (err) {
-          console.error("Failed to process signal", err);
+          console.error("[Trystero] Failed to process WebRTC signal:", err);
         }
       };
 

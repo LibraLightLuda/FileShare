@@ -38,7 +38,13 @@ export function normalizeRoomCode(code: string): string {
   return code.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
 }
 
-export function hashRoomId(normalizedCode: string): Promise<string> {
+/**
+ * 임의의 코드(하이픈 포함 여부 상관 없음)를 정규화한 후 SHA-256 해시값으로 변환하여
+ * 두 피어가 항상 동일한 Trystero 트래커 Room ID를 생성하도록 보장합니다.
+ */
+export function hashRoomId(code: string): Promise<string> {
+  // 하이픈 제거 및 대문자 변환으로 동일한 접속 코드에 대해 항상 동일한 Room ID 생성
+  const normalizedCode = normalizeRoomCode(code);
   const encoder = new TextEncoder();
   const data = encoder.encode(`fileshare:v1:${normalizedCode}`);
   

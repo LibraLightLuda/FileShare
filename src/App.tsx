@@ -108,10 +108,13 @@ export default function App() {
   }, [webrtcState, appMode, manualDcRef, closeWebRTC]);
 
   const handleCreateRoom = () => {
+    // 8자리 접속 코드 생성 (예: 'A2B3-C4D5')
     const code = generateRoomCode();
     setRoomCode(code);
     setAppMode('room');
-    initRoom(code, true);
+    // 방 생성 시에도 정규화된 8자리 코드를 전달하여 방 생성자와 접속자 간의 Room ID 해시 일치 보장
+    const normalized = normalizeRoomCode(code);
+    initRoom(normalized, true);
     generateQR(code);
   };
 
