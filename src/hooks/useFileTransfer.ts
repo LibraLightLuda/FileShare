@@ -197,14 +197,30 @@ export function useFileTransfer(
         console.error('Failed to parse DataChannel JSON message', e);
       }
     } else {
-      // Binary chunk
-      const buffer = data as ArrayBuffer;
-      const view = new DataView(buffer);
+      let buffer: ArrayBuffer;
+      let byteOffset = 0;
+      let byteLength = 0;
+
+      if (data instanceof ArrayBuffer) {
+        buffer = data;
+        byteOffset = 0;
+        byteLength = data.byteLength;
+      } else if (ArrayBuffer.isView(data)) {
+        const viewData = data as any;
+        buffer = viewData.buffer;
+        byteOffset = viewData.byteOffset;
+        byteLength = viewData.byteLength;
+      } else {
+        console.error("Unknown binary type received:", data);
+        return;
+      }
+
+      const view = new DataView(buffer, byteOffset, byteLength);
       
       const proto = view.getUint8(0);
       if (proto !== PROTOCOL_VERSION) return; 
       
-      const idBytes = new Uint8Array(buffer, 1, 16);
+      const idBytes = new Uint8Array(buffer, byteOffset + 1, 16);
       let uuidHex = '';
       for (let i = 0; i < 16; i++) {
         uuidHex += idBytes[i].toString(16).padStart(2, '0');
@@ -214,7 +230,7 @@ export function useFileTransfer(
       // const chunkIndex = view.getUint32(17, true);
       const payloadLength = view.getUint32(21, true);
       
-      const chunk = buffer.slice(25, 25 + payloadLength);
+      const chunk = buffer.slice(byteOffset + 25, byteOffset + 25 + payloadLength);
       
       const buf = receiveBuffers.current[transferId];
       if (buf) {
